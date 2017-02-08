@@ -59,8 +59,8 @@ class Client(object):
             return E_OK
         
         return E_PACKET_NUMBER
-      
-      
+    
+    
     def requestData(self):
         if len(self.datagrams) == 0 or None in self.datagrams:
             return None
@@ -112,12 +112,12 @@ class UDPServer(DatagramServer):
         
         data = client.requestData()
         #print data
-      
+        
         if data:
             id = struct.unpack("=B", data[:1])
             data = buffer(data, 1, len(data))
             #serverReceive.process_data(id, request, address, data)
-      
+    
     
     
     def sendOk(self, address, id, request, count, num):

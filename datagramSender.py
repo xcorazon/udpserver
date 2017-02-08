@@ -69,8 +69,8 @@ class DatagramSender(object):
                 header = struct.pack("=BQIHH", packetType, self.id, self.request, len(self.packets), packNumber)
                 self.sock.sendto(buffer(header) + data, self.server_address)
                 #self.checkResponse()
-          
-          packNumber += 1
+            
+            packNumber += 1
     
     
     def prepareData(self, data):
@@ -95,18 +95,19 @@ class DatagramSender(object):
                 self.sendPackets()
                 delta = current_time() - self.start_sending_time
                 continue
-          
-          if server[0] == self.server_address[0] and server[1] == self.server_address[1]:
-              type, id, request, count, num = struct.unpack("=BQIHH", data)
-              if id == self.id:
-                  if type == T_OK:
-                      self.sended[num] = True
-                  elif type == T_ERROR:
-                      return SEND_ERROR, request
-                
-          if not False in self.sended:
-              self.sending_time = current_time() - self.start_sending_time
-              return SEND_OK, None
+            #print "data length = %d" % len(data)
+            #print "data = " + str(data)
+            if server[0] == self.server_address[0] and server[1] == self.server_address[1]:
+                type, id, request, count, num = struct.unpack("=BQIHH", data[:17])
+                if id == self.id:
+                    if type == T_OK:
+                        self.sended[num] = True
+                    elif type == T_ERR:
+                        return SEND_ERROR, request
+                  
+            if not False in self.sended:
+                self.sending_time = current_time() - self.start_sending_time
+                return SEND_OK, None
           
         return SEND_ERROR_TIMEOUT, None
     
@@ -117,4 +118,7 @@ class DatagramSender(object):
       
 sender = DatagramSender(('127.0.0.1', 521))
 sender.max_packet_size = 100
-print sender.send(10, 'Hello!!!')
+while True:
+    print sender.send(10, 'Hello!!!')
+    print "sending time = %d" % sender.sending_time
+    sender.request += 1
