@@ -2,14 +2,14 @@
 #define __UDP_SERVER_H
 
 #include <time.h>
-#include "consts.h"
+#include "const.h"
 
-enum {
-    T_OK = 0,
-    T_ERR,
-    T_DATA,
-    T_CONNECT
-};
+
+#define   T_OK      0
+#define   T_ERR     1
+#define   T_DATA    2
+#define   T_CONNECT 3
+
 
 
 #pragma pack(push, 1)
@@ -21,12 +21,18 @@ struct data_header
     unsigned short packs_count;
     unsigned short subpack;
 };
-#pragma pack(pop) 
+#pragma pack(pop)
+
+/* client send-recv state */
+#define RS_COMPLETED 0
+#define RS_TRANSFER  1
 
 struct udp_client
 {
     unsigned long long id;
-    unsigned int request_id;
+    unsigned int recv_id;
+    unsigned int send_id;
+    size_t data_size;
     
     clock_t last_recv;
     clock_t timeout;
@@ -36,7 +42,11 @@ struct udp_client
     struct sockaddr addr;
     
     char recvd_subpacks[MAX_SUBPACKS_COUNT];
+    char recv_state;
     char sended_subpacks[MAX_SUBPACKS_COUNT];
+    char send_state;
+    
+    char *buffer;
 };
 
 #endif /* __UDP_SERVER_H__ */
