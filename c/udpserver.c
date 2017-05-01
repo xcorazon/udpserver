@@ -20,7 +20,7 @@ char buffer[BUFF_SIZE];
 
 /* server clients */
 static struct udp_client clients[MAX_CLIENTS];
-static char *clients_heap = 0;
+static char *clients_recv_heap = 0;
 
 
 static int check_recv(struct udp_client *client, int subpacks_count)
@@ -102,7 +102,7 @@ static void remove_client(unsigned long long id)
 
 static void handle_data(struct udp_client *client)
 {
-    client->buffer[client->data_size] = "\0";
+    client->buffer[client->rdata_size] = "\0";
     printf("received: %s\n", client->buffer);
 }
 
@@ -120,6 +120,42 @@ static void handle_ok(struct udp_client *client, struct data_header *header)
 }
 
 
+void send_data(struct udp_client *client, char *data, size_t size)
+{
+    char sbuffer[MAX_DATAGRAM_SIZE + 100];
+    struct data_header *header = (struct data_header *)sbuffer;
+    size_t tail = size % MAX_DATAGRAM_SIZE;
+    
+    client->sdata_size = size;
+    client->send_state = RS_TRANSFER;
+    client->sbuffer = data;
+    
+    header->type = T_DATA;
+    header->id = client->id;
+    header->request_id = client->send_id;
+    header->packs_count = size / MAX_DATAGRAM_SIZE;
+    
+    int i = 0;
+    while(i < header->packs_count - 1) {
+        header->subpack = i;
+        memcpy(sbuffer + sizeof(struct data_header), data + MAX_DATAGRAM_SIZE * i, MAX_DATAGRAM_SIZE);
+        sendto(hsock, sbuffer, sizeof(struct data_header) + MAX_DATAGRAM_SIZE, 0, addr, sizeof(struct sockaddr));
+        i++;
+    }
+    if(tail != 0) {
+        header->subpack = i;
+        memcpy(sbuffer + sizeof(struct data_header), data + MAX_DATAGRAM_SIZE * i, tail);
+        sendto(hsock, sbuffer, sizeof(struct data_header) + tail, 0, addr, sizeof(struct sockaddr));
+    }
+}
+
+
+void send_lost_packets()
+{
+  
+}
+
+
 static void recv_datagram(struct udp_client *client, struct data_header *header, char *data, socklen_t size)
 {
     if(client->recvd_subpacks[header->subpack])
@@ -132,7 +168,7 @@ static void recv_datagram(struct udp_client *client, struct data_header *header,
     
     /* вычисляем полный размер получаемых данных */
     if(header->subpack == header->packs_count - 1)
-        client->data_size = (header->packs_count - 1) * MAX_DATAGRAM_SIZE + dgram_size;
+        client->rdata_size = (header->packs_count - 1) * MAX_DATAGRAM_SIZE + dgram_size;
     
     if(check_recv(client, header->packs_count)) {
         reset_recv(client);
@@ -178,19 +214,19 @@ static void udp_cb(EV_P_ ev_io *w, int revents)
 
 static void init_clients()
 {
-    clients_heap = (char *)malloc(MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE * MAX_CLIENTS);
+    clients_recv_heap = (char *)malloc(MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE * MAX_CLIENTS);
     
     for(int i=0; i<MAX_CLIENTS; i++) {
         clients[i].id = 0;
-        clients[i].buffer = clients_heap + i * MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE;
+        clients[i].rbuffer = clients_recv_heap + i * MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE;
     }
 }
 
 
 static void release_clients()
 {
-    if(clients_heap)
-      free(clients_heap);
+    if(clients_recv_heap)
+      free(clients_recv_heap);
 }
 
 

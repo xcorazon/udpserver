@@ -26,13 +26,15 @@ struct data_header
 /* client send-recv state */
 #define RS_COMPLETED 0
 #define RS_TRANSFER  1
+#define RS_READY     2
 
 struct udp_client
 {
     unsigned long long id;
     unsigned int recv_id;
     unsigned int send_id;
-    size_t data_size;
+    size_t rdata_size;    /* read data size */
+    size_t sdata_size;    /* send data size */
     
     clock_t last_recv;
     clock_t timeout;
@@ -46,7 +48,8 @@ struct udp_client
     char sended_subpacks[MAX_SUBPACKS_COUNT];
     char send_state;
     
-    char *buffer;
+    char *rbuffer;
+    char *sbuffer;
 };
 
 #endif /* __UDP_SERVER_H__ */
