@@ -102,8 +102,8 @@ static void remove_client(unsigned long long id)
 
 static void handle_data(struct udp_client *client)
 {
-    client->buffer[client->rdata_size] = "\0";
-    printf("received: %s\n", client->buffer);
+    client->rbuffer[client->rdata_size] = 0;
+    printf("received: %s\n", client->rbuffer);
 }
 
 
@@ -139,13 +139,13 @@ void send_data(struct udp_client *client, char *data, size_t size)
     while(i < header->packs_count - 1) {
         header->subpack = i;
         memcpy(sbuffer + sizeof(struct data_header), data + MAX_DATAGRAM_SIZE * i, MAX_DATAGRAM_SIZE);
-        sendto(hsock, sbuffer, sizeof(struct data_header) + MAX_DATAGRAM_SIZE, 0, addr, sizeof(struct sockaddr));
+        sendto(hsock, sbuffer, sizeof(struct data_header) + MAX_DATAGRAM_SIZE, 0, &client->addr, sizeof(struct sockaddr));
         i++;
     }
     if(tail != 0) {
         header->subpack = i;
         memcpy(sbuffer + sizeof(struct data_header), data + MAX_DATAGRAM_SIZE * i, tail);
-        sendto(hsock, sbuffer, sizeof(struct data_header) + tail, 0, addr, sizeof(struct sockaddr));
+        sendto(hsock, sbuffer, sizeof(struct data_header) + tail, 0, &client->addr, sizeof(struct sockaddr));
     }
 }
 
@@ -164,7 +164,7 @@ static void recv_datagram(struct udp_client *client, struct data_header *header,
     client->recvd_subpacks[header->subpack] = 1;
     
     int dgram_size = size - sizeof(struct data_header);
-    memcpy(client->buffer + header->subpack * MAX_DATAGRAM_SIZE, data, dgram_size);
+    memcpy(client->rbuffer + header->subpack * MAX_DATAGRAM_SIZE, data, dgram_size);
     
     /* вычисляем полный размер получаемых данных */
     if(header->subpack == header->packs_count - 1)
@@ -230,6 +230,16 @@ static void release_clients()
 }
 
 
+static void timeout_cb (EV_P_ ev_timer *w, int revents)
+{
+    puts ("timeout");
+    // this causes the innermost ev_run to stop iterating
+    //ev_break (EV_A_ EVBREAK_ONE);
+    ev_timer_set (w, 0.5, 0.);
+    ev_timer_start (EV_A_ w);
+}
+
+
 int main(void)
 {
     int port = UDP_PORT;
@@ -249,8 +259,14 @@ int main(void)
     /* инициализация наблюдателя за событием */
     struct ev_loop *loop = EV_DEFAULT;
     ev_io udp_watcher;
+    ev_timer timeout_watcher;
+    
     ev_io_init(&udp_watcher, udp_cb, hsock, EV_READ);
     ev_io_start(loop, &udp_watcher);
+    
+    ev_timer_init (&timeout_watcher, timeout_cb, 0.5, 0.);
+    ev_timer_start (loop, &timeout_watcher);
+    
     ev_loop(loop, 0);
     
     close(hsock);
