@@ -1,4 +1,4 @@
-﻿#ifndef __CONSTS_H__
+#ifndef __CONSTS_H__
 #define __CONSTS_H__
 
 #define MAX_SUBPACKS_COUNT 256

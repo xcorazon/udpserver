@@ -1,4 +1,4 @@
-﻿#ifndef __UDP_SERVER_H__
+#ifndef __UDP_SERVER_H__
 #define __UDP_SERVER_H
 
 #include <time.h>
@@ -24,9 +24,10 @@ struct data_header
 #pragma pack(pop)
 
 /* client send-recv state */
-#define RS_COMPLETED 0
-#define RS_TRANSFER  1
-#define RS_READY     2
+#define RS_COMPLETED  0
+#define RS_TRANSFER   1
+#define RS_CONNECTION 2
+#define RS_READY      3
 
 struct udp_client
 {
