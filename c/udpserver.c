@@ -101,9 +101,7 @@ static struct udp_client* add_client(unsigned long long id)
 static void remove_client(unsigned long long id)
 {
     for(int i=0; i<MAX_CLIENTS; i++) {
-      
         if(clients[i].id == id) {
-          
             clients[i].id = 0;
             return;
         }
@@ -149,10 +147,8 @@ void send_data(struct udp_client *client)
     
     int i = 0;
     while(i < header->packs_count - 1) {
-      
         header->subpack = i;
         if (!client->sended_subpacks[i]) {
-        
             memcpy(sbuffer + sizeof(struct data_header), client->sbuffer + MAX_DATAGRAM_SIZE * i, MAX_DATAGRAM_SIZE);
             sendto(hsock, sbuffer, sizeof(struct data_header) + MAX_DATAGRAM_SIZE, 0, &client->addr, sizeof(struct sockaddr));
         }
@@ -197,6 +193,10 @@ void send_lost_packets(struct udp_client *client)
 
 static void recv_datagram(struct udp_client *client, struct data_header *header, char *data, socklen_t size)
 {
+    /* check request id */
+    if(header->request_id != client->recv_id)
+        return;
+
     if(client->recvd_subpacks[header->subpack])
         return;
     
@@ -255,10 +255,12 @@ static void handle_packet(char *buffer, struct sockaddr *addr, socklen_t size)
     
     if(header->type == T_DATA) {
         recv_datagram(client, header, data, size);
-        
-        header->type = T_OK;
-        sendto(hsock, header, sizeof(struct data_header), 0, addr, sizeof(struct sockaddr));
-        
+
+        if(header->request_id <= client->recv_id) {
+            header->type = T_OK;
+            sendto(hsock, header, sizeof(struct data_header), 0, addr, sizeof(struct sockaddr));
+        }
+    
     } else if(header->type == T_OK) {
         handle_ok(client, header);
     }
