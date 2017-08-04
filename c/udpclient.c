@@ -23,6 +23,8 @@ static struct udp_client client;
 static char *client_recv_buf = 0;
 static char *client_send_buf = 0;
 
+static char *host = '54.165.59.155';
+
 
 static int check_recv(struct udp_client *client, int subpacks_count)
 {
@@ -108,9 +110,12 @@ void send_data(struct udp_client *client, char *data, size_t size)
 }
 
 
-void send_lost_packets()
+void send_lost_packets(struct udp_client *client)
 {
-  
+    if(client->send_state == RS_TRANSFER)
+        send_data(client);
+    else if(client->send_state == RS_CONNECTION)
+        send_connect(client);
 }
 
 
@@ -194,53 +199,64 @@ static void release_client()
 }
 
 
-static void timeout_cb (EV_P_ ev_timer *w, int revents)
-{
-    puts ("timeout");
-    // this causes the innermost ev_run to stop iterating
-    //ev_break (EV_A_ EVBREAK_ONE);
-    ev_timer_set (w, 0.5, 0.);
-    ev_timer_start (EV_A_ w);
-}
-
-
 int main(void)
 {
-    int port = UDP_PORT;
-    puts("udp client started...");
-    
-    init_client();
-    
-    /* настройка udp сокета на слушание */
-    hsock = socket(AF_INET, SOCK_DGRAM, 0);
-    
-    if(hsock < 0) {
-        perror("socket");
-        exit(2);
+    struct sockaddr_in si_other;
+    int s, slen=sizeof(si_other);
+    char buf[BUFLEN];
+    char message[BUFLEN];
+    WSADATA wsa;
+ 
+    //Initialise winsock
+    printf("\nInitialising Winsock...");
+    if (WSAStartup(MAKEWORD(2,2),&wsa) != 0)
+    {
+        printf("Failed. Error Code : %d",WSAGetLastError());
+        exit(EXIT_FAILURE);
     }
-    
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = ;
-    if(bind(hsock, (struct sockaddr *)&addr, sizeof(addr)) != 0)
-        perror("bind");
-    
-    /* инициализация наблюдателя за событием */
-    struct ev_loop *loop = EV_DEFAULT;
-    ev_io udp_watcher;
-    ev_timer timeout_watcher;
-    
-    ev_io_init(&udp_watcher, udp_cb, hsock, EV_READ);
-    ev_io_start(loop, &udp_watcher);
-    
-    ev_timer_init (&timeout_watcher, timeout_cb, 0.5, 0.);
-    ev_timer_start (loop, &timeout_watcher);
-    
-    ev_loop(loop, 0);
-    
-    close(hsock);
-    release_clients();
-    
+    printf("Initialised.\n");
+     
+    //create socket
+    if ( (s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == SOCKET_ERROR)
+    {
+        printf("socket() failed with error code : %d" , WSAGetLastError());
+        exit(EXIT_FAILURE);
+    }
+     
+    //setup address structure
+    memset((char *) &si_other, 0, sizeof(si_other));
+    si_other.sin_family = AF_INET;
+    si_other.sin_port = htons(UDP_PORT);
+    si_other.sin_addr.S_un.S_addr = inet_addr(host);
+     
+    //start communication
+    while(1)
+    {
+        printf("Enter message : ");
+        gets(message);
+         
+        //send the message
+        if (sendto(s, message, strlen(message) , 0 , (struct sockaddr *) &si_other, slen) == SOCKET_ERROR)
+        {
+            printf("sendto() failed with error code : %d" , WSAGetLastError());
+            exit(EXIT_FAILURE);
+        }
+         
+        //receive a reply and print it
+        //clear the buffer by filling null, it might have previously received data
+        memset(buf,'\0', BUFLEN);
+        //try to receive some data, this is a blocking call
+        if (recvfrom(s, buf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen) == SOCKET_ERROR)
+        {
+            printf("recvfrom() failed with error code : %d" , WSAGetLastError());
+            exit(EXIT_FAILURE);
+        }
+         
+        puts(buf);
+    }
+ 
+    closesocket(s);
+    WSACleanup();
+ 
     return 0;
 }
