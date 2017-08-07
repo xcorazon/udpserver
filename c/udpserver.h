@@ -1,5 +1,5 @@
 #ifndef __UDP_SERVER_H__
-#define __UDP_SERVER_H
+#define __UDP_SERVER_H__
 
 #include <time.h>
 #include "const.h"
