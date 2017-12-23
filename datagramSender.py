@@ -19,14 +19,14 @@ SEND_OK            = 0
 SEND_ERROR         = 1
 SEND_ERROR_TIMEOUT = 2
 
-MAX_PACKET_SIZE = 8000
+MAX_PACKET_SIZE = 1200
 
 class DatagramSender(object):
   
     sock = None
     
     timeout = 5
-    max_packet_size = 8000
+    max_packet_size = 1200
     
     packet_delivering_time = 0.05
     
@@ -116,8 +116,8 @@ class DatagramSender(object):
         if self.sock and self.closeSocketOnDelete:
             self.sock.close()
       
-sender = DatagramSender(('127.0.0.1', 521))
-sender.max_packet_size = 100
+sender = DatagramSender(('54.165.59.155', 13555))
+sender.max_packet_size = 1200
 while True:
     print sender.send(10, 'Hello!!!')
     print "sending time = %d" % sender.sending_time
