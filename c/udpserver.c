@@ -20,7 +20,7 @@ char buffer[BUFF_SIZE];
 
 /* server clients */
 static struct udp_client clients[MAX_CLIENTS];
-static char *clients_recv_heap = 0;
+static char *clients_recv_buffer = 0;
 
 /* temporary function for generate new client id */
 /* TODO: заменить указателем на функцию генерации id */
@@ -132,7 +132,29 @@ static void handle_ok(struct udp_client *client, struct data_header *header)
 }
 
 
-void send_data(struct udp_client *client)
+void send_packet(int socket,
+                 struct udp_client *client,
+                 char *buffer,
+                 int pack_number,
+                 size_t max_pack_size,
+                 size_t pack_size)
+{
+    if (client->sended_subpacks[pack_number])
+        return;
+    
+#define HEADER_SIZE sizeof(struct data_header)
+    
+    void *source_data = client->sbuffer + max_pack_size * pack_number;
+    size_t data_size = HEADER_SIZE + pack_size;
+    
+    memcpy(buffer + HEADER_SIZE, source_data, pack_size);
+    sendto(socket, buffer, data_size, 0, &client->addr, sizeof(struct sockaddr));
+    
+#undef HEADER_SIZE
+}
+
+
+void send_data(int socket, struct udp_client *client)
 {
     char sbuffer[MAX_DATAGRAM_SIZE + 100];
     struct data_header *header = (struct data_header *)sbuffer;
@@ -140,32 +162,33 @@ void send_data(struct udp_client *client)
     
     //client->send_state = RS_TRANSFER;
     
+    /* init header */
     header->type = T_DATA;
     header->id = client->id;
     header->request_id = client->send_id;
-    header->packs_count = client->sdata_size / MAX_DATAGRAM_SIZE;
     
+    header->packs_count = client->sdata_size / MAX_DATAGRAM_SIZE;
+    if(tail)
+        header->packs_count++;
+    else
+        tail = MAX_DATAGRAM_SIZE;
+    
+    /* send packets */
     int i = 0;
-    while(i < header->packs_count - 1) {
+    int count = header->packs_count - 1;
+    while(i < count) {
         header->subpack = i;
-        if (!client->sended_subpacks[i]) {
-            memcpy(sbuffer + sizeof(struct data_header), client->sbuffer + MAX_DATAGRAM_SIZE * i, MAX_DATAGRAM_SIZE);
-            sendto(hsock, sbuffer, sizeof(struct data_header) + MAX_DATAGRAM_SIZE, 0, &client->addr, sizeof(struct sockaddr));
-        }
+        send_packet(socket, client, sbuffer, i, MAX_DATAGRAM_SIZE, MAX_DATAGRAM_SIZE);
         i++;
     }
     
-    if(tail != 0) {
-        header->subpack = i;
-        if (!client->sended_subpacks[i]) {
-            memcpy(sbuffer + sizeof(struct data_header), client->sbuffer + MAX_DATAGRAM_SIZE * i, tail);
-            sendto(hsock, sbuffer, sizeof(struct data_header) + tail, 0, &client->addr, sizeof(struct sockaddr));
-        }
-    }
+    /* send tail (хвост данных) */
+    header->subpack = i;
+    send_packet(socket, client, sbuffer, i, MAX_DATAGRAM_SIZE, tail);
 }
 
 
-void send_connect(struct udp_client *client)
+void send_connect(int socket, struct udp_client *client)
 {
     printf("send connection id = %llu\n", client->id);
     char sbuffer[MAX_DATAGRAM_SIZE + 100];
@@ -176,18 +199,18 @@ void send_connect(struct udp_client *client)
     header->request_id = client->send_id;
     header->packs_count = 1;
     
-    sendto(hsock, sbuffer, sizeof(struct data_header), 0, &client->addr, sizeof(struct sockaddr));
+    sendto(socket, sbuffer, sizeof(struct data_header), 0, &client->addr, sizeof(struct sockaddr));
 
     client->send_state = RS_CONNECTION;
 }
 
 
-void send_lost_packets(struct udp_client *client)
+void send_lost_packets(int socket, struct udp_client *client)
 {
     if(client->send_state == RS_TRANSFER)
-        send_data(client);
+        send_data(socket, client);
     else if(client->send_state == RS_CONNECTION)
-        send_connect(client);
+        send_connect(socket, client);
 }
 
 
@@ -218,7 +241,7 @@ static void recv_datagram(struct udp_client *client, struct data_header *header,
 }
 
 
-static void handle_packet(char *buffer, struct sockaddr *addr, socklen_t size)
+static void handle_packet(int socket, char *buffer, struct sockaddr *addr, socklen_t size)
 {
     struct data_header *header = (struct data_header *)buffer;
     char *data = buffer + sizeof(struct data_header);
@@ -232,14 +255,12 @@ static void handle_packet(char *buffer, struct sockaddr *addr, socklen_t size)
             client = add_client(connection_id);
             memcpy(&client->addr, addr, sizeof(struct sockaddr));
             
-            if(client->send_state == RS_COMPLETED) {
-                send_connect(client);
-                return;
-            } else {
-                send_lost_packets(client);
-                return;
-            }
+            if(client->send_state == RS_COMPLETED)
+                send_connect(socket, client);
+            else
+                send_lost_packets(socket, client);
             
+            return;
         }
     }
     
@@ -247,9 +268,8 @@ static void handle_packet(char *buffer, struct sockaddr *addr, socklen_t size)
     if(!client && header->request_id == 1)
         client = add_client(header->id);
     
-    if(!client && header->type != T_CONNECT) {
+    if(!client && header->type != T_CONNECT)
         return;
-    }
     
     memcpy(&client->addr, addr, sizeof(struct sockaddr));
     
@@ -271,25 +291,25 @@ static void udp_cb(EV_P_ ev_io *w, int revents)
 {
     socklen_t bytes = recvfrom(hsock, buffer, sizeof(buffer) - 1, 0, (struct sockaddr *) &addr, (socklen_t *) &addr_len);
     
-    handle_packet(buffer, (struct sockaddr *)&addr, bytes);
+    handle_packet(hsock, buffer, (struct sockaddr *)&addr, bytes);
 }
 
 
 static void init_clients()
 {
-    clients_recv_heap = (char *)malloc(MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE * MAX_CLIENTS);
+    clients_recv_buffer = (char *)malloc(MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE * MAX_CLIENTS);
     
     for(int i=0; i<MAX_CLIENTS; i++) {
         clients[i].id = 0;
-        clients[i].rbuffer = clients_recv_heap + i * MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE;
+        clients[i].rbuffer = clients_recv_buffer + i * MAX_SUBPACKS_COUNT * MAX_DATAGRAM_SIZE;
     }
 }
 
 
 static void release_clients()
 {
-    if(clients_recv_heap)
-      free(clients_recv_heap);
+    if(clients_recv_buffer)
+      free(clients_recv_buffer);
 }
 
 
@@ -303,7 +323,7 @@ static void timeout_cb (EV_P_ ev_timer *w, int revents)
         if (clients[i].id == 0 || clients[i].send_state == RS_COMPLETED)
             continue;
           
-        send_lost_packets(&clients[i]);
+        send_lost_packets(hsock, &clients[i]);
     }
     
     ev_timer_set (w, 0.5, 0.);
