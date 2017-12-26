@@ -25,7 +25,7 @@ struct data_header
 };
 #pragma pack(pop)
 
-#define PAYLOAD_DATA_SIZE (MAX_DATAGRAM_SIZE-sizeof(data_header))
+#define PAYLOAD_DATA_SIZE (MAX_DATAGRAM_SIZE-sizeof(struct data_header))
 
 /* client send-recv state */
 #define RS_COMPLETED  0
