@@ -68,6 +68,9 @@ static void reset_send(struct udp_client *client)
 
 static struct udp_client* get_client(unsigned long long id)
 {
+    if (id == 0)
+        return 0;
+    
     printf("get client id=%i\n", (int)id);
     for(int i=0; i<MAX_CLIENTS; i++) {
         printf("client id = %i\n", (int)clients[i].id);
@@ -126,17 +129,18 @@ static void handle_ok(struct udp_client *client, struct data_header *header)
                 client->send_id++;
             }
         }
-    } else if (client->send_state == RS_CONNECTION) {
-        client->send_state = RS_COMPLETED;
+    } 
+    else if (client->send_state == RS_CONNECTION) {
+        client->send_state = RS_READY;
     }
 }
 
 
-void send_packet(int socket,
+void send_datagram(int socket,
                  struct udp_client *client,
                  char *buffer,
                  int pack_number,
-                 size_t max_pack_size,
+                 size_t max_payload_size,
                  size_t pack_size)
 {
     if (client->sended_subpacks[pack_number])
@@ -144,7 +148,7 @@ void send_packet(int socket,
     
 #define HEADER_SIZE sizeof(struct data_header)
     
-    void *source_data = client->sbuffer + max_pack_size * pack_number;
+    void *source_data = client->sbuffer + max_payload_size * pack_number;
     size_t data_size = HEADER_SIZE + pack_size;
     
     memcpy(buffer + HEADER_SIZE, source_data, pack_size);
@@ -158,7 +162,7 @@ void send_data(int socket, struct udp_client *client)
 {
     char sbuffer[MAX_DATAGRAM_SIZE + 100];
     struct data_header *header = (struct data_header *)sbuffer;
-    size_t tail = client->sdata_size % MAX_DATAGRAM_SIZE;
+    size_t tail = client->sdata_size % PAYLOAD_DATA_SIZE;
     
     //client->send_state = RS_TRANSFER;
     
@@ -167,24 +171,24 @@ void send_data(int socket, struct udp_client *client)
     header->id = client->id;
     header->request_id = client->send_id;
     
-    header->packs_count = client->sdata_size / MAX_DATAGRAM_SIZE;
+    header->packs_count = client->sdata_size / PAYLOAD_DATA_SIZE;
     if(tail)
         header->packs_count++;
     else
-        tail = MAX_DATAGRAM_SIZE;
+        tail = PAYLOAD_DATA_SIZE;
     
     /* send packets */
     int i = 0;
     int count = header->packs_count - 1;
     while(i < count) {
         header->subpack = i;
-        send_packet(socket, client, sbuffer, i, MAX_DATAGRAM_SIZE, MAX_DATAGRAM_SIZE);
+        send_datagram(socket, client, sbuffer, i, PAYLOAD_DATA_SIZE, PAYLOAD_DATA_SIZE);
         i++;
     }
     
     /* send tail (хвост данных) */
     header->subpack = i;
-    send_packet(socket, client, sbuffer, i, MAX_DATAGRAM_SIZE, tail);
+    send_datagram(socket, client, sbuffer, i, PAYLOAD_DATA_SIZE, tail);
 }
 
 
@@ -194,7 +198,7 @@ void send_connect(int socket, struct udp_client *client)
     char sbuffer[MAX_DATAGRAM_SIZE + 100];
     struct data_header *header = (struct data_header *)sbuffer;
     
-    header->type = T_CONNECT;
+    header->type = T_ACCEPT_CONNECTION;
     header->id = client->id;
     header->request_id = client->send_id;
     header->packs_count = 1;
@@ -202,6 +206,7 @@ void send_connect(int socket, struct udp_client *client)
     sendto(socket, sbuffer, sizeof(struct data_header), 0, &client->addr, sizeof(struct sockaddr));
 
     client->send_state = RS_CONNECTION;
+    client->recv_state = RS_CONNECTION;
 }
 
 
@@ -237,7 +242,6 @@ static void recv_datagram(struct udp_client *client, struct data_header *header,
         client->recv_id++;
         handle_data(client);
     }
-    
 }
 
 
@@ -248,40 +252,39 @@ static void handle_packet(int socket, char *buffer, struct sockaddr *addr, sockl
     
     struct udp_client *client;
 
-    /* check for connection request */
+    /* получение клиента и проверка запроса на соединение  */
+    client = get_client(header->id);
     if(header->type == T_CONNECT) {
-        if(header->id == 0) {
+        if(header->id == 0 && !client) {
             unsigned long long connection_id = get_new_id();
             client = add_client(connection_id);
             memcpy(&client->addr, addr, sizeof(struct sockaddr));
-            
-            if(client->send_state == RS_COMPLETED)
-                send_connect(socket, client);
-            else
-                send_lost_packets(socket, client);
-            
-            return;
         }
+        if (client)
+            send_connect(socket, client);
+        return;
     }
-    
-    client = get_client(header->id);
-    if(!client && header->request_id == 1)
-        client = add_client(header->id);
-    
-    if(!client && header->type != T_CONNECT)
+    if (!client)
         return;
     
     memcpy(&client->addr, addr, sizeof(struct sockaddr));
     
-    if(header->type == T_DATA) {
+    if (header->type == T_ACCEPT_CONNECTION) {
+        header->type = T_CONNECTION_ACCEPTED;
+        sendto(hsock, header, sizeof(struct data_header), 0, addr, sizeof(struct sockaddr));
+    }
+    else if (header->type == T_CONNECTION_ACCEPTED) {
+        client->send_state = RS_READY;
+        client->recv_state = RS_READY;
+    }
+    else if(header->type == T_DATA) {
         recv_datagram(client, header, data, size);
-
         if(header->request_id <= client->recv_id) {
             header->type = T_OK;
             sendto(hsock, header, sizeof(struct data_header), 0, addr, sizeof(struct sockaddr));
         }
-    
-    } else if(header->type == T_OK) {
+    }
+    else if(header->type == T_OK) {
         handle_ok(client, header);
     }
 }

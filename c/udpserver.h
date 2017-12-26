@@ -9,6 +9,8 @@
 #define   T_ERR     1
 #define   T_DATA    2
 #define   T_CONNECT 3
+#define   T_ACCEPT_CONNECTION   4
+#define   T_CONNECTION_ACCEPTED 5
 
 
 
@@ -22,6 +24,8 @@ struct data_header
     unsigned short subpack;
 };
 #pragma pack(pop)
+
+#define PAYLOAD_DATA_SIZE (MAX_DATAGRAM_SIZE-sizeof(data_header))
 
 /* client send-recv state */
 #define RS_COMPLETED  0
