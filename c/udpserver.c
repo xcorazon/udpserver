@@ -1,3 +1,7 @@
+#include "const.h"
+#include "udpserver.h"
+#include "client.h"
+
 #include <stdio.h>
 #include <strings.h>
 #include <string.h>
@@ -6,9 +10,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
-
-#include "const.h"
-#include "udpserver.h"
+#include <inttypes.h>
+#include <stdbool.h>
 
 #define BUFF_SIZE 4096
 
@@ -19,89 +22,49 @@ int addr_len = sizeof(addr);
 char buffer[BUFF_SIZE];
 
 /* server clients */
-static struct udp_client clients[MAX_CLIENTS];
+static UdpClient clients[MAX_CLIENTS];
 static char *clients_recv_buffer = 0;
 
 /* temporary function for generate new client id */
 /* TODO: заменить указателем на функцию генерации id */
-static long long int get_new_id()
+static uint64_t get_new_id()
 {
-    static long long int next_id = 0;
+    static uint64_t next_id = 0;
     next_id++;
     return next_id;
 }
 
-
-static int check_recv(struct udp_client *client, int subpacks_count)
-{
-    for(int i=0; i<subpacks_count; i++)
-        if(!client->recvd_subpacks[i])
-            return 0;
-    
-    return 1;
-}
-
-
-static int check_send(struct udp_client *client, int subpacks_count)
-{
-    for(int i=0; i<subpacks_count; i++)
-        if(!client->sended_subpacks[i])
-            return 0;
-    
-    return 1;
-}
-
-
-static void reset_recv(struct udp_client *client)
-{
-    bzero(&client->recvd_subpacks, MAX_SUBPACKS_COUNT);
-    client->recv_state = RS_COMPLETED;
-}
-
-
-static void reset_send(struct udp_client *client)
-{
-    bzero(&client->sended_subpacks, MAX_SUBPACKS_COUNT);
-    client->send_state = RS_COMPLETED;
-}
-
-
-static struct udp_client* get_client(unsigned long long id)
+UdpClient* get_client(uint64_t id)
 {
     if (id == 0)
         return 0;
     
-    printf("get client id=%i\n", (int)id);
+    printf("get client id=%" PRIu64 "\n", id);
     for(int i=0; i<MAX_CLIENTS; i++) {
-        printf("client id = %i\n", (int)clients[i].id);
+        printf("client id = %" PRIu64 "\n", clients[i].id);
         if(clients[i].id == id)
             return &clients[i];
     }
     
-    return 0;
+    return NULL;
 }
 
 
-static struct udp_client* add_client(unsigned long long id)
+static UdpClient* add_client(uint64_t id)
 {
-    printf("add client id=%i\n", (int)id);
+    printf("add client id=%" PRIu64 "\n", id);
     for(int i=0; i<MAX_CLIENTS; i++) {
         if(clients[i].id == 0) {
-            clients[i].id = id;
-            clients[i].recv_id = 1;
-            clients[i].send_id = 1;
-            reset_recv(&clients[i]);
-            reset_send(&clients[i]);
-
+            init_client(&clients[i], id);
             return &clients[i];
         }
     }
 
-    return 0;
+    return NULL;
 }
 
 
-static void remove_client(unsigned long long id)
+static void remove_client(uint64_t id)
 {
     for(int i=0; i<MAX_CLIENTS; i++) {
         if(clients[i].id == id) {
@@ -112,14 +75,14 @@ static void remove_client(unsigned long long id)
 }
 
 
-static void handle_data(struct udp_client *client)
+static void handle_data(UdpClient *client)
 {
-    client->rbuffer[client->rdata_size] = 0;
-    printf("received: %s\n", client->rbuffer);
+    *(char *)(client->rbuffer + client->rdata_size) = '\0';
+    printf("received: %s\n", (char *)client->rbuffer);
 }
 
 
-static void handle_ok(struct udp_client *client, struct data_header *header)
+static void handle_ok(UdpClient *client, struct data_header *header)
 {
     if(client->send_state == RS_TRANSFER) {
         if(client->send_id == header->request_id) {
@@ -130,14 +93,11 @@ static void handle_ok(struct udp_client *client, struct data_header *header)
             }
         }
     } 
-    else if (client->send_state == RS_CONNECTION) {
-        client->send_state = RS_READY;
-    }
 }
 
 
 void send_datagram(int socket,
-                 struct udp_client *client,
+                 struct UdpClient *client,
                  char *buffer,
                  int pack_number,
                  size_t max_payload_size,
@@ -158,13 +118,13 @@ void send_datagram(int socket,
 }
 
 
-void send_data(int socket, struct udp_client *client)
+void send_data(int socket, UdpClient *client)
 {
     char sbuffer[MAX_DATAGRAM_SIZE + 100];
     struct data_header *header = (struct data_header *)sbuffer;
     size_t tail = client->sdata_size % PAYLOAD_DATA_SIZE;
     
-    //client->send_state = RS_TRANSFER;
+    client->send_state = RS_TRANSFER;
     
     /* init header */
     header->type = T_DATA;
@@ -192,9 +152,9 @@ void send_data(int socket, struct udp_client *client)
 }
 
 
-void send_connect(int socket, struct udp_client *client)
+static void send_connect(int socket, UdpClient *client)
 {
-    printf("send connection id = %llu\n", client->id);
+    printf("send connection id = %" PRIu64 "\n", client->id);
     char sbuffer[MAX_DATAGRAM_SIZE + 100];
     struct data_header *header = (struct data_header *)sbuffer;
     
@@ -210,7 +170,7 @@ void send_connect(int socket, struct udp_client *client)
 }
 
 
-void send_lost_packets(int socket, struct udp_client *client)
+static void send_lost_packets(int socket, UdpClient *client)
 {
     if(client->send_state == RS_TRANSFER)
         send_data(socket, client);
@@ -219,7 +179,7 @@ void send_lost_packets(int socket, struct udp_client *client)
 }
 
 
-static void recv_datagram(struct udp_client *client, struct data_header *header, char *data, socklen_t size)
+static void recv_datagram(UdpClient *client, struct data_header *header, char *data, socklen_t size)
 {
     /* check request id */
     if(header->request_id != client->recv_id)
@@ -245,12 +205,12 @@ static void recv_datagram(struct udp_client *client, struct data_header *header,
 }
 
 
-static void handle_packet(int socket, char *buffer, struct sockaddr *addr, socklen_t size)
+void handle_packet(int socket, char *buffer, struct sockaddr *addr, socklen_t size)
 {
     struct data_header *header = (struct data_header *)buffer;
     char *data = buffer + sizeof(struct data_header);
     
-    struct udp_client *client;
+    UdpClient *client;
 
     /* получение клиента и проверка запроса на соединение  */
     client = get_client(header->id);
